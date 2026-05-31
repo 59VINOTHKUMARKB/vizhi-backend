@@ -25,9 +25,8 @@ class AgentRow(Base):
     api_key_hash: Mapped[str] = mapped_column(Text, nullable=False)
     masked_key: Mapped[str] = mapped_column(Text, nullable=False)
     owner: Mapped[str] = mapped_column(Text, default="")
-    tags: Mapped[str] = mapped_column(Text, default="[]")  # JSON array
+    tags: Mapped[str] = mapped_column(Text, default="[]")   
     status: Mapped[str] = mapped_column(Text, default="active")
-    preferred_model: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[_dt.datetime] = mapped_column(
         DateTime, server_default=func.now()
     )
@@ -45,9 +44,9 @@ class ModelConnectionRow(Base):
     id: Mapped[str] = mapped_column(Text, primary_key=True)
     provider: Mapped[str] = mapped_column(Text, nullable=False)
     model_name: Mapped[str] = mapped_column(Text, nullable=False)
-    endpoint_url: Mapped[str] = mapped_column(Text, default="")
+    api_key_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    masked_key: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(Text, default="active")
-    sdk_type: Mapped[str | None] = mapped_column(Text, nullable=True)
     metadata_: Mapped[str | None] = mapped_column("metadata", Text, nullable=True)
     usage_count: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[_dt.datetime] = mapped_column(

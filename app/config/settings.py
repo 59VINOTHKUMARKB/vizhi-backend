@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://localhost:11434"
 
     # ── CORS ────────────────────────────────────────────────────────────
-    cors_origins: str = "http://localhost:3000"
+    cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000,http://192.168.0.9:3000"
 
     # ── API Key Generation ──────────────────────────────────────────────
     api_key_prefix: str = "vz_live_"

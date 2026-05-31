@@ -74,12 +74,18 @@ class ModelConnectionResponse(BaseModel):
     id: str
     provider: str
     model_name: str
-    endpoint_url: str
     status: str
-    sdk_type: str | None = None
     metadata: str | None = None
     usage_count: int = 0
+    masked_key: str
     created_at: str
+
+
+class ModelConnectionCreatedResponse(BaseModel):
+    model_connection: ModelConnectionResponse
+    api_key: str = Field(
+        ..., description="Full Vizhi model token returned once on creation"
+    )
 
 
 # ── Query / Response history ────────────────────────────────────────────
