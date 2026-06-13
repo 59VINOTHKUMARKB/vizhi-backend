@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config.settings import settings
 from app.db.init_db import init_db
 from app.api.agents import router as agents_router
+from app.api.agent_queue import router as agent_queue_router
 from app.api.auth import router as auth_router
 from app.api.chat import router as chat_router
 from app.api.models import router as models_router
@@ -44,6 +45,7 @@ app.add_middleware(
 # Include API Routers
 app.include_router(auth_router)
 app.include_router(agents_router)
+app.include_router(agent_queue_router)
 app.include_router(chat_router)
 app.include_router(models_router)
 app.include_router(queries_router)

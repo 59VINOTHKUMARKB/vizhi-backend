@@ -8,7 +8,7 @@ import uuid
 
 import bcrypt
 from dataclasses import dataclass
-from fastapi import Depends, HTTPException, Security, status
+from fastapi import Depends, Header, HTTPException, Security, status
 from fastapi.security import APIKeyHeader
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -57,6 +57,15 @@ class ChatCredential:
     principal_id: str
     token_type: str
     model_name: str | None = None
+    user_id: str | None = None
+
+
+@dataclass(frozen=True)
+class AgentQueueCredential:
+    """Authenticated credential used by the on-site agent queue."""
+
+    agent_id: str
+    agent_name: str
     user_id: str | None = None
 
 
@@ -139,6 +148,84 @@ async def resolve_chat_credential(
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Invalid API key",
+    )
+
+
+async def resolve_gateway_credential(
+    authorization: str | None = Security(_api_key_header),
+    x_agent_cid: str | None = Header(default=None, alias="X-Agent-CID"),
+    x_agent_token: str | None = Header(default=None, alias="X-Agent-Token"),
+    db: AsyncSession = Depends(get_db),
+) -> ChatCredential:
+    """Resolve either a model token or an explicit agent queue credential."""
+    if x_agent_cid or x_agent_token:
+        if not x_agent_cid or not x_agent_token:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Both X-Agent-CID and X-Agent-Token are required",
+            )
+        result = await db.execute(
+            select(AgentRow).where(
+                AgentRow.agent_id == x_agent_cid,
+                AgentRow.status == "active",
+            )
+        )
+        agent = result.scalars().first()
+        if not agent or not verify_api_key(x_agent_token, agent.api_key_hash):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid agent credentials",
+            )
+        return ChatCredential(
+            principal_id=agent.agent_id,
+            token_type="agent",
+            user_id=agent.user_id,
+        )
+
+    return await resolve_chat_credential(authorization, db)
+
+
+async def resolve_agent_queue_credential(
+    x_agent_cid: str | None = Header(default=None, alias="X-Agent-CID"),
+    x_agent_token: str | None = Header(default=None, alias="X-Agent-Token"),
+    db: AsyncSession = Depends(get_db),
+) -> AgentQueueCredential:
+    """Resolve the authenticated agent that is fetching or submitting jobs."""
+    return await verify_agent_queue_credentials(
+        db,
+        agent_cid=x_agent_cid,
+        agent_token=x_agent_token,
+    )
+
+
+async def verify_agent_queue_credentials(
+    db: AsyncSession,
+    *,
+    agent_cid: str | None,
+    agent_token: str | None,
+) -> AgentQueueCredential:
+    if not agent_cid or not agent_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Both X-Agent-CID and X-Agent-Token are required",
+        )
+
+    result = await db.execute(
+        select(AgentRow).where(
+            AgentRow.agent_id == agent_cid,
+            AgentRow.status == "active",
+        )
+    )
+    agent = result.scalars().first()
+    if not agent or not verify_api_key(agent_token, agent.api_key_hash):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid agent credentials",
+        )
+    return AgentQueueCredential(
+        agent_id=agent.agent_id,
+        agent_name=agent.name,
+        user_id=agent.user_id,
     )
 
 

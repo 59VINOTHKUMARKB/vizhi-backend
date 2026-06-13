@@ -72,6 +72,24 @@ class AgentRow(Base):
     )
 
 
+class AgentRuntimeRow(Base):
+    __tablename__ = "agent_runtime"
+
+    agent_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    device_name: Mapped[str] = mapped_column(Text, default="")
+    os_name: Mapped[str] = mapped_column(Text, default="")
+    agent_version: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(Text, default="offline")
+    last_heartbeat: Mapped[_dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    available_engines: Mapped[str] = mapped_column(Text, default="[]")
+    created_at: Mapped[_dt.datetime] = mapped_column(
+        DateTime, server_default=func.now()
+    )
+    updated_at: Mapped[_dt.datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
+
+
 # ── Model Connections ───────────────────────────────────────────────────
 
 
@@ -132,4 +150,34 @@ class ResponseRow(Base):
     estimated_cost: Mapped[float] = mapped_column(Float, default=0.0)
     timestamp: Mapped[_dt.datetime] = mapped_column(
         DateTime, server_default=func.now()
+    )
+
+
+class AgentJobRow(Base):
+    __tablename__ = "agent_jobs"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    query_id: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    user_id: Mapped[str | None] = mapped_column(
+        Text, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    agent_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    provider: Mapped[str] = mapped_column(Text, nullable=False)
+    model: Mapped[str] = mapped_column(Text, nullable=False)
+    sdk_type: Mapped[str | None] = mapped_column(Text, nullable=True)
+    endpoint: Mapped[str] = mapped_column(Text, default="/v1/chat/completions")
+    kind: Mapped[str] = mapped_column(Text, default="chat")
+    input_payload: Mapped[str] = mapped_column(Text, nullable=False)
+    stream: Mapped[int] = mapped_column(Integer, default=0)
+    metadata_: Mapped[str] = mapped_column("metadata", Text, default="{}")
+    status: Mapped[str] = mapped_column(Text, default="queued")
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[_dt.datetime] = mapped_column(
+        DateTime, server_default=func.now()
+    )
+    claimed_at: Mapped[_dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    completed_at: Mapped[_dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    updated_at: Mapped[_dt.datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
     )

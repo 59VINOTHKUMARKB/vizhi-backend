@@ -79,6 +79,41 @@ class AgentCreatedResponse(BaseModel):
     )
 
 
+class AgentRuntimeResponse(BaseModel):
+    agent_id: str
+    device_name: str = ""
+    os_name: str = ""
+    agent_version: str = ""
+    status: str = "offline"
+    last_heartbeat: str | None = None
+    available_engines: list[str] = Field(default_factory=list)
+    updated_at: str = ""
+
+
+class AgentJobQueueItemResponse(BaseModel):
+    id: str
+    query_id: str
+    agent_id: str = ""
+    provider: str
+    model: str
+    sdk_type: str | None = None
+    endpoint: str
+    kind: str = "chat"
+    engine: str = ""
+    input: dict = Field(default_factory=dict)
+    stream: bool = False
+    metadata: dict = Field(default_factory=dict)
+    attempt_count: int = 0
+
+
+class AgentJobCompletionResponse(BaseModel):
+    ok: bool = True
+    job_id: str
+    status: str
+    query_id: str
+    completed_at: str = ""
+
+
 # ── Model Connection Response ───────────────────────────────────────────
 
 
