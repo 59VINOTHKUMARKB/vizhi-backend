@@ -1,12 +1,16 @@
-"""Database initialization – creates all tables on first run."""
+"""Database initialization — creates tables on both local and remote databases."""
 
 from __future__ import annotations
+
+import logging
 
 from sqlalchemy import text
 
 from app.config.settings import settings
-from app.db.session import engine
+from app.db.session import local_engine, remote_engine
 from app.models.db_models import Base
+
+logger = logging.getLogger("vizhi.db")
 
 
 async def _sync_sqlite_agents_schema(conn) -> None:
@@ -89,8 +93,11 @@ async def _ensure_sqlite_column(
 
 
 async def init_db() -> None:
-    """Create tables if they don't exist yet."""
-    async with engine.begin() as conn:
+    """Create tables on both local and remote databases."""
+
+    # ── 1. Initialize LOCAL database (SQLite) ───────────────────────
+    logger.info("Initializing local database...")
+    async with local_engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         if settings.database_url.startswith("sqlite"):
             await _ensure_sqlite_column(
@@ -112,3 +119,19 @@ async def init_db() -> None:
                 column_definition="TEXT",
             )
             await _sync_sqlite_agents_schema(conn)
+    logger.info("✅ Local database ready")
+
+    # ── 2. Initialize REMOTE database (Supabase PostgreSQL) ─────────
+    if remote_engine is not None:
+        try:
+            logger.info("Initializing remote database (Supabase)...")
+            async with remote_engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+            logger.info("✅ Remote database ready")
+        except Exception as e:
+            logger.error(
+                f"⚠️  Remote database init failed: {e} — "
+                "continuing with local-only mode"
+            )
+    else:
+        logger.info("No remote database configured — local-only mode")

@@ -16,6 +16,17 @@ class Settings(BaseSettings):
 
     # ── Database ────────────────────────────────────────────────────────
     database_url: str = "sqlite+aiosqlite:///./vizhi.db"
+    #---- Remote Data base url ___________
+   
+    remote_database_url:str = ""
+
+    #----- Sync settings for the local to the server -----
+
+    sync_enabled: bool = True
+    sync_interval:int = 30
+    sync_batch_size: int = 100
+
+    
 
     # ── Inference routing ───────────────────────────────────────────────
     inference_backend: str = "huggingface"
