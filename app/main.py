@@ -8,7 +8,10 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config.settings import settings
 from app.db.init_db import init_db
+from app.db.sync_service import sync_service
 from app.api.agents import router as agents_router
+from app.api.agent_queue import router as agent_queue_router
+from app.api.auth import router as auth_router
 from app.api.chat import router as chat_router
 from app.api.models import router as models_router
 from app.api.queries import router as queries_router
@@ -18,10 +21,21 @@ from app.api.dashboard import router as dashboard_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Lifecycle events manager — initializes the database on startup."""
-    # Create database tables if they do not exist
+    """Lifecycle — init DB, hydrate from remote, start background sync."""
+
+    # 1. Create tables on both local SQLite and remote Supabase PostgreSQL
     await init_db()
+
+    # 2. If local DB is empty (fresh Docker container), hydrate from remote
+    await sync_service.hydrate_local_from_remote()
+
+    # 3. Start background sync loop (local → remote, every N seconds)
+    await sync_service.start()
+
     yield
+
+    # 4. On shutdown: final flush of pending data to remote
+    await sync_service.stop()
 
 
 app = FastAPI(
@@ -41,7 +55,9 @@ app.add_middleware(
 )
 
 # Include API Routers
+app.include_router(auth_router)
 app.include_router(agents_router)
+app.include_router(agent_queue_router)
 app.include_router(chat_router)
 app.include_router(models_router)
 app.include_router(queries_router)

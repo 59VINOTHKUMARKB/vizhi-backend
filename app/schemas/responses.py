@@ -8,6 +8,20 @@ from pydantic import BaseModel, Field
 # ── Chat Completion Response (OpenAI-compatible) ────────────────────────
 
 
+class UserResponse(BaseModel):
+    id: str
+    email: str
+    email_verified: bool
+    name: str = ""
+    avatar_url: str = ""
+
+
+class AuthResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: UserResponse
+
+
 class ChatChoiceMessage(BaseModel):
     role: str = "assistant"
     content: str
@@ -63,6 +77,41 @@ class AgentCreatedResponse(BaseModel):
     api_key: str = Field(
         ..., description="Full API key – shown only once, store securely"
     )
+
+
+class AgentRuntimeResponse(BaseModel):
+    agent_id: str
+    device_name: str = ""
+    os_name: str = ""
+    agent_version: str = ""
+    status: str = "offline"
+    last_heartbeat: str | None = None
+    available_engines: list[str] = Field(default_factory=list)
+    updated_at: str = ""
+
+
+class AgentJobQueueItemResponse(BaseModel):
+    id: str
+    query_id: str
+    agent_id: str = ""
+    provider: str
+    model: str
+    sdk_type: str | None = None
+    endpoint: str
+    kind: str = "chat"
+    engine: str = ""
+    input: dict = Field(default_factory=dict)
+    stream: bool = False
+    metadata: dict = Field(default_factory=dict)
+    attempt_count: int = 0
+
+
+class AgentJobCompletionResponse(BaseModel):
+    ok: bool = True
+    job_id: str
+    status: str
+    query_id: str
+    completed_at: str = ""
 
 
 # ── Model Connection Response ───────────────────────────────────────────

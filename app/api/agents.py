@@ -10,8 +10,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.api_key import generate_api_key, hash_api_key, mask_api_key
+from app.auth.user_auth import get_current_user
 from app.db.session import get_db
-from app.models.db_models import AgentRow
+from app.models.db_models import AgentRow, UserRow
 from app.schemas.requests import CreateAgentRequest, UpdateAgentRequest
 from app.schemas.responses import AgentCreatedResponse, AgentResponse
 
@@ -44,6 +45,7 @@ async def _generate_agent_cid(db: AsyncSession) -> str:
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def create_agent(
     body: CreateAgentRequest,
+    user: UserRow = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> AgentCreatedResponse:
     """Create a new agent and generate an API key."""
@@ -53,6 +55,7 @@ async def create_agent(
 
     row = AgentRow(
         id=uuid.uuid4().hex[:12],
+        user_id=user.id,
         agent_id=cid,
         name=body.name,
         description=body.description,
@@ -72,21 +75,27 @@ async def create_agent(
 
 @router.get("")
 async def list_agents(
+    user: UserRow = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[AgentResponse]:
     """List all agents."""
-    result = await db.execute(select(AgentRow).order_by(AgentRow.created_at.desc()))
+    result = await db.execute(
+        select(AgentRow)
+        .where(AgentRow.user_id == user.id)
+        .order_by(AgentRow.created_at.desc())
+    )
     return [_agent_to_response(row) for row in result.scalars().all()]
 
 
 @router.get("/{agent_id}")
 async def get_agent(
     agent_id: str,
+    user: UserRow = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> AgentResponse:
     """Get a single agent by agent_id (CID)."""
     result = await db.execute(
-        select(AgentRow).where(AgentRow.agent_id == agent_id)
+        select(AgentRow).where(AgentRow.agent_id == agent_id, AgentRow.user_id == user.id)
     )
     row = result.scalars().first()
     if not row:
@@ -98,11 +107,12 @@ async def get_agent(
 async def update_agent(
     agent_id: str,
     body: UpdateAgentRequest,
+    user: UserRow = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> AgentResponse:
     """Update agent fields."""
     result = await db.execute(
-        select(AgentRow).where(AgentRow.agent_id == agent_id)
+        select(AgentRow).where(AgentRow.agent_id == agent_id, AgentRow.user_id == user.id)
     )
     row = result.scalars().first()
     if not row:
@@ -124,11 +134,12 @@ async def update_agent(
 @router.delete("/{agent_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_agent(
     agent_id: str,
+    user: UserRow = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
     """Delete an agent by its CID."""
     result = await db.execute(
-        select(AgentRow).where(AgentRow.agent_id == agent_id)
+        select(AgentRow).where(AgentRow.agent_id == agent_id, AgentRow.user_id == user.id)
     )
     row = result.scalars().first()
     if not row:
