@@ -14,7 +14,7 @@ from typing import Any
 
 import bcrypt
 import httpx
-from fastapi import Depends, HTTPException, Security, status
+from fastapi import Depends, HTTPException, Request, Security, status
 from fastapi.security import APIKeyHeader
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -78,17 +78,24 @@ def create_access_token(user: UserRow) -> str:
     return _encode_token(payload)
 
 
+def _get_auth_token(authorization: str | None, request: Request) -> str | None:
+    if authorization:
+        return authorization.removeprefix("Bearer ").strip()
+    return request.cookies.get("access_token")
+
+
 async def get_current_user(
-    authorization: str | None = Security(_auth_header),
+    request: Request,
     db: AsyncSession = Depends(get_db),
+    authorization: str | None = Security(_auth_header),
 ) -> UserRow:
-    if not authorization:
+    token = _get_auth_token(authorization, request)
+    if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing Authorization header",
+            detail="Missing authentication token",
         )
 
-    token = authorization.removeprefix("Bearer ").strip()
     payload = _decode_token(token)
     user_id = str(payload.get("sub", ""))
     result = await db.execute(select(UserRow).where(UserRow.id == user_id))

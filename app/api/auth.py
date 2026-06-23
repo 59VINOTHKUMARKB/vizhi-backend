@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.user_auth import (
@@ -18,6 +18,7 @@ from app.auth.user_auth import (
     verify_google_id_token,
     verify_password,
 )
+from app.config.settings import settings
 from app.db.session import get_db
 from app.models.db_models import UserRow
 from app.schemas.requests import GoogleLoginRequest, LoginRequest, SignupRequest
@@ -26,9 +27,22 @@ from app.schemas.responses import AuthResponse, UserResponse
 router = APIRouter(prefix="/v1/auth", tags=["auth"])
 
 
+def _set_auth_cookie(response: Response, access_token: str) -> None:
+    response.set_cookie(
+        key="access_token",
+        value=access_token,
+        httponly=True,
+        secure=False,
+        samesite="lax",
+        max_age=int(settings.auth_token_ttl_minutes * 60),
+        path="/",
+    )
+
+
 @router.post("/signup", status_code=status.HTTP_201_CREATED)
 async def signup(
     body: SignupRequest,
+    response: Response,
     db: AsyncSession = Depends(get_db),
 ) -> AuthResponse:
     email = normalize_email(body.email)
@@ -42,12 +56,15 @@ async def signup(
         )
 
     await link_password_account(db, user=user, password=body.password)
-    return _auth_response(user)
+    auth_response = _auth_response(user)
+    _set_auth_cookie(response, auth_response.access_token)
+    return auth_response
 
 
 @router.post("/login")
 async def login(
     body: LoginRequest,
+    response: Response,
     db: AsyncSession = Depends(get_db),
 ) -> AuthResponse:
     email = normalize_email(body.email)
@@ -67,12 +84,15 @@ async def login(
     ):
         raise _invalid_login()
 
-    return _auth_response(user)
+    auth_response = _auth_response(user)
+    _set_auth_cookie(response, auth_response.access_token)
+    return auth_response
 
 
 @router.post("/google")
 async def google_login(
     body: GoogleLoginRequest,
+    response: Response,
     db: AsyncSession = Depends(get_db),
 ) -> AuthResponse:
     identity = await verify_google_id_token(body.id_token)
@@ -88,7 +108,9 @@ async def google_login(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Linked Google account no longer exists",
             )
-        return _auth_response(user)
+        auth_response = _auth_response(user)
+        _set_auth_cookie(response, auth_response.access_token)
+        return auth_response
 
     user = await find_user_by_email(db, identity.email)
     if user is None:
@@ -107,12 +129,19 @@ async def google_login(
             user.avatar_url = identity.avatar_url
 
     await link_google_account(db, user=user, identity=identity)
-    return _auth_response(user)
+    auth_response = _auth_response(user)
+    _set_auth_cookie(response, auth_response.access_token)
+    return auth_response
 
 
 @router.get("/me")
 async def me(user: UserRow = Depends(get_current_user)) -> UserResponse:
     return user_to_response(user)
+
+
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+async def logout(response: Response) -> None:
+    response.delete_cookie("access_token", path="/")
 
 
 def _auth_response(user: UserRow) -> AuthResponse:
