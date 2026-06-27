@@ -129,6 +129,15 @@ async def chat_completions(
             ) from exc
 
     start = time.perf_counter_ns()
+    query_row = await persist_query(
+        db,
+        agent_id=credential.principal_id,
+        user_id=credential.user_id,
+        provider=provider_name,
+        model=resolved_model,
+        sdk_type=body.call_sdk,
+        messages=messages_raw,
+    )
     try:
         assert provider is not None
         result = await provider.chat_completion(

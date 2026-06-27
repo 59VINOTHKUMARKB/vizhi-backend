@@ -11,6 +11,7 @@ import time
 from typing import Any
 
 import httpx
+import random
 
 from app.config.settings import settings
 from app.providers.base import ProviderResponse
@@ -18,11 +19,33 @@ from app.providers.base import ProviderResponse
 
 _CHAT_COMPLETIONS_PATH = "/v1/chat/completions"
 _DEFAULT_MODEL_ALIASES = {
-    "llama/meta-llama/Llama-3.1-8B-Instruct": "meta-llama/Llama-3.1-8B-Instruct:fastest",
-    "llama/meta-llama/Llama-3.2-3B-Instruct": "meta-llama/Llama-3.2-3B-Instruct:fastest",
-    "mistral/mistralai/Mistral-7B-Instruct-v0.3": "mistralai/Mistral-7B-Instruct-v0.3:fastest",
-    "mistral/mistralai/Mixtral-8x7B-Instruct-v0.1": "mistralai/Mixtral-8x7B-Instruct-v0.1:fastest",
-    "deepseek/deepseek-ai/DeepSeek-R1-Distill-Qwen-7B": "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B:fastest",
+    "llama/meta-llama/Llama-3.1-8B-Instruct":
+        "meta-llama/Llama-3.1-8B-Instruct:fastest",
+
+    "llama/meta-llama/Llama-3.2-3B-Instruct":
+        "meta-llama/Llama-3.2-3B-Instruct:fastest",
+
+    "mistral/mistralai/Mistral-7B-Instruct-v0.3":
+        "mistralai/Mistral-7B-Instruct-v0.3:fastest",
+
+    "mistral/mistralai/Mixtral-8x7B-Instruct-v0.1":
+        "mistralai/Mixtral-8x7B-Instruct-v0.1:fastest",
+
+    "deepseek/deepseek-ai/DeepSeek-R1-Distill-Qwen-7B":
+        "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B:fastest",
+
+    # Qwen models
+    "qwen/Qwen/Qwen2.5-7B-Instruct":
+        "Qwen/Qwen2.5-7B-Instruct:fastest",
+
+    "qwen/Qwen/Qwen2.5-3B-Instruct":
+        "Qwen/Qwen2.5-3B-Instruct:fastest",
+
+    "qwen/Qwen/Qwen2.5-1.5B-Instruct":
+        "Qwen/Qwen2.5-1.5B-Instruct:fastest",
+
+    "qwen/Qwen/Qwen2.5-Coder-7B-Instruct":
+        "Qwen/Qwen2.5-Coder-7B-Instruct:fastest",
 }
 
 
@@ -41,36 +64,43 @@ async def chat_completion(
     separated fallback order, for example ``huggingface`` or
     ``custom,huggingface``.
     """
+    
+    
     errors: list[str] = []
     for backend in _backend_order():
-        try:
-            if backend == "huggingface":
-                return await _openai_compatible_call(
-                    backend_name=backend,
-                    provider_name=provider_name,
-                    base_url=settings.huggingface_base_url,
-                    api_key=settings.huggingface_api_key or settings.hf_token,
-                    require_api_key=True,
-                    model=_resolve_model(provider_name, model),
-                    messages=messages,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                )
-            if backend == "custom":
-                return await _openai_compatible_call(
-                    backend_name=backend,
-                    provider_name=provider_name,
-                    base_url=kwargs.get("base_url") or settings.custom_inference_base_url,
-                    api_key=settings.custom_inference_api_key,
-                    require_api_key=False,
-                    model=_resolve_model(provider_name, model),
-                    messages=messages,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                )
-            raise RuntimeError(f"Unknown inference backend: {backend}")
-        except Exception as exc:
-            errors.append(f"{backend}: {exc}")
+        candidates = _candidate_models(provider_name=provider_name,fallback_model=model)
+        for candidate_model in candidates:
+            try:
+                if backend == "huggingface":
+                    return await _openai_compatible_call(
+                        backend_name=backend,
+                        provider_name=provider_name,
+                        base_url=settings.huggingface_base_url,
+                        api_key=settings.huggingface_api_key or settings.hf_token,
+                        require_api_key=True,
+                        model=candidate_model,
+                        messages=messages,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                    )
+                if backend == "custom":
+                    return await _openai_compatible_call(
+                        backend_name=backend,
+                        provider_name=provider_name,
+                        base_url=kwargs.get("base_url") or settings.custom_inference_base_url,
+                        api_key=settings.custom_inference_api_key,
+                        require_api_key=False,
+                        model=_resolve_model(provider_name, model),
+                        messages=messages,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                    )
+                raise RuntimeError(f"Unknown inference backend: {backend}")
+            except Exception as exc:
+                msg = f"{backend}/{candidates}: {exc}"
+                errors.append(msg)
+                continue
+            
 
     raise RuntimeError("; ".join(errors) or "No inference backend configured")
 
@@ -85,14 +115,27 @@ def _backend_order() -> list[str]:
 
 
 def _resolve_model(provider_name: str, model: str) -> str:
-    """Map Vizhi model aliases to real backend model ids when configured."""
-    model_map = _model_map()
-    return (
-        model_map.get(f"{provider_name}/{model}")
-        or model_map.get(model)
-        or _DEFAULT_MODEL_ALIASES.get(model)
-        or model
-    )
+    candidates = _candidate_models(provider_name=provider_name,fallback_model=model)
+    return candidates[0]
+ 
+
+def _candidate_models(provider_name: str , fallback_model: str) -> list[str]:
+    """
+       Return an Ordered list of model , which helps the  __openai_compitable call to perform multiple execution of other models.
+    """
+
+    pool = list(_DEFAULT_MODEL_ALIASES.values())
+
+    seen,unique_pool = set(),[]
+
+    for m in pool:
+        if m not in seen:
+            seen.add(m)
+            unique_pool.append(m)
+    random.shuffle(unique_pool)
+
+    return unique_pool
+
 
 
 def _model_map() -> dict[str, str]:
