@@ -61,6 +61,9 @@ class Settings(BaseSettings):
     auth_jwt_secret: str = "change-me-in-production"
     auth_jwt_issuer: str = "vizhi"
     auth_token_ttl_minutes: int = 60 * 24 * 7
+    auth_cookie_name: str = "vizhi_session"
+    auth_cookie_secure: bool = False
+    auth_cookie_samesite: str = "lax"
     google_client_id: str = ""
 
     # ── Helpers ─────────────────────────────────────────────────────────

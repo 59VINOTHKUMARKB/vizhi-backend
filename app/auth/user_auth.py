@@ -14,7 +14,7 @@ from typing import Any
 
 import bcrypt
 import httpx
-from fastapi import Depends, HTTPException, Security, status
+from fastapi import Depends, HTTPException, Request, Response, Security, status
 from fastapi.security import APIKeyHeader
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -78,17 +78,59 @@ def create_access_token(user: UserRow) -> str:
     return _encode_token(payload)
 
 
+def set_session_cookie(response: Response, token: str) -> None:
+    """Persist the JWT in an HttpOnly session cookie."""
+    response.set_cookie(
+        key=settings.auth_cookie_name,
+        value=token,
+        httponly=True,
+        secure=settings.auth_cookie_secure,
+        samesite=settings.auth_cookie_samesite,
+        max_age=settings.auth_token_ttl_minutes * 60,
+        path="/",
+    )
+
+
+def clear_session_cookie(response: Response) -> None:
+    """Remove the session cookie on logout."""
+    response.delete_cookie(
+        key=settings.auth_cookie_name,
+        path="/",
+        secure=settings.auth_cookie_secure,
+        samesite=settings.auth_cookie_samesite,
+    )
+
+
+def resolve_session_token(
+    request: Request,
+    authorization: str | None,
+) -> str | None:
+    """Read a browser session JWT from cookie or Bearer header."""
+    cookie_token = request.cookies.get(settings.auth_cookie_name)
+    if cookie_token:
+        return cookie_token
+
+    if not authorization:
+        return None
+
+    bearer = authorization.removeprefix("Bearer ").strip()
+    if not bearer or bearer.startswith(settings.api_key_prefix):
+        return None
+    return bearer
+
+
 async def get_current_user(
+    request: Request,
     authorization: str | None = Security(_auth_header),
     db: AsyncSession = Depends(get_db),
 ) -> UserRow:
-    if not authorization:
+    token = resolve_session_token(request, authorization)
+    if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing Authorization header",
+            detail="Not authenticated",
         )
 
-    token = authorization.removeprefix("Bearer ").strip()
     payload = _decode_token(token)
     user_id = str(payload.get("sub", ""))
     result = await db.execute(select(UserRow).where(UserRow.id == user_id))
