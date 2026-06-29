@@ -130,6 +130,7 @@ async def create_model_connection(
     )
     db.add(row)
     await db.flush()
+    await db.commit()
 
     return ModelConnectionCreatedResponse(
         model_connection=_row_to_response(row),

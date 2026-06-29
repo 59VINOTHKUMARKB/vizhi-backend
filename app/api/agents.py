@@ -66,6 +66,7 @@ async def create_agent(
     )
     db.add(row)
     await db.flush()
+    await db.commit()
 
     return AgentCreatedResponse(
         agent=_agent_to_response(row),
