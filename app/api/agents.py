@@ -14,7 +14,7 @@ from app.auth.user_auth import get_current_user
 from app.db.session import get_db
 from app.models.db_models import AgentRow, UserRow
 from app.schemas.requests import CreateAgentRequest, UpdateAgentRequest
-from app.schemas.responses import AgentCreatedResponse, AgentResponse
+from app.schemas.responses import AgentCreatedResponse, AgentResponse, AgentRotatedResponse
 
 router = APIRouter(prefix="/v1/agents", tags=["agents"])
 
@@ -26,9 +26,11 @@ def _agent_to_response(row: AgentRow) -> AgentResponse:
         agent_id=row.agent_id,
         name=row.name,
         description=row.description or "",
+        token_name=row.token_name,
         tags=tags if isinstance(tags, list) else [],
         status=row.status,
         masked_key=row.masked_key,
+        last_used_at=row.last_used_at.isoformat() if row.last_used_at else None,
         created_at=row.created_at.isoformat() if row.created_at else "",
         updated_at=row.updated_at.isoformat() if row.updated_at else "",
     )
@@ -59,6 +61,7 @@ async def create_agent(
         agent_id=cid,
         name=body.name,
         description=body.description,
+        token_name=body.token_name,
         api_key_hash=hash_api_key(raw_key),
         masked_key=mask_api_key(raw_key),
         tags=json.dumps(tags),
@@ -130,6 +133,64 @@ async def update_agent(
 
     await db.flush()
     return _agent_to_response(row)
+
+
+@router.post("/{agent_id}/revoke", status_code=status.HTTP_200_OK)
+async def revoke_agent(
+    agent_id: str,
+    user: UserRow = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> AgentResponse:
+    """Revoke an agent token — it immediately becomes unusable for authentication."""
+    result = await db.execute(
+        select(AgentRow).where(AgentRow.agent_id == agent_id, AgentRow.user_id == user.id)
+    )
+    row = result.scalars().first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    if row.status == "revoked":
+        raise HTTPException(status_code=409, detail="Token is already revoked")
+
+    row.status = "revoked"
+    await db.flush()
+    await db.refresh(row)
+    return _agent_to_response(row)
+
+
+@router.post("/{agent_id}/rotate", status_code=status.HTTP_200_OK)
+async def rotate_agent(
+    agent_id: str,
+    user: UserRow = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> AgentRotatedResponse:
+    """Rotate the API key for an agent.
+
+    Generates a new cryptographically secure key, hashes it, and atomically
+    marks the old key as revoked.  The new plaintext key is returned once —
+    store it immediately.
+    """
+    result = await db.execute(
+        select(AgentRow).where(AgentRow.agent_id == agent_id, AgentRow.user_id == user.id)
+    )
+    row = result.scalars().first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    new_raw_key = generate_api_key()
+
+    # Atomically replace the key and re-activate the token in one commit.
+    row.api_key_hash = hash_api_key(new_raw_key)
+    row.masked_key = mask_api_key(new_raw_key)
+    row.status = "active"
+    # Preserve: name, description, token_name, tags, created_at, last_used_at
+
+    await db.flush()
+    await db.refresh(row)
+
+    return AgentRotatedResponse(
+        agent=_agent_to_response(row),
+        api_key=new_raw_key,
+    )
 
 
 @router.delete("/{agent_id}", status_code=status.HTTP_204_NO_CONTENT)

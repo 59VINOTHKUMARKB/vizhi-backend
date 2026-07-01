@@ -91,7 +91,7 @@ async def persist_response(
     db.add(row)
     await db.flush()
 
-    # Increment model connection usage count.
+    # Increment model connection usage count and update stats.
     if provider_response and status_code < 400:
         result = await db.execute(
             select(ModelConnectionRow).where(
@@ -102,6 +102,9 @@ async def persist_response(
         mc = result.scalars().first()
         if mc:
             mc.usage_count += 1
+            mc.last_used_at = _utcnow()
+            mc.total_tokens_consumed += (provider_response.input_tokens + provider_response.output_tokens)
+            mc.total_cost += row.estimated_cost
 
     return row
 

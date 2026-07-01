@@ -56,6 +56,7 @@ class CreateAgentRequest(BaseModel):
     name: str = Field(..., min_length=2)
     description: str = Field("", min_length=0)
     tags: str = Field("", description="Comma-separated tags")
+    token_name: str | None = Field(None, max_length=120, description="Optional friendly label for this token")
 
 
 class UpdateAgentRequest(BaseModel):

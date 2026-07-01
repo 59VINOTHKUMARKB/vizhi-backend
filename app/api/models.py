@@ -13,7 +13,13 @@ from app.auth.user_auth import get_current_user
 from app.db.session import get_db
 from app.models.db_models import ModelConnectionRow, UserRow
 from app.schemas.requests import CreateModelConnectionRequest
-from app.schemas.responses import ModelConnectionCreatedResponse, ModelConnectionResponse
+from app.schemas.responses import (
+    ModelConnectionCreatedResponse,
+    ModelConnectionResponse,
+    ModelUsageDetailResponse,
+    ModelUsageStats,
+    QueryDetailItem,
+)
 
 router = APIRouter(prefix="/v1/models", tags=["models"])
 
@@ -72,7 +78,7 @@ _MODEL_CATALOG: list[dict] = [
         ],
     },
     {
-        "id": "deepseek",
+        "id": "deepseek",   
         "label": "DeepSeek",
         "models": [
             {
@@ -155,6 +161,145 @@ async def list_models(
 async def model_registry() -> list[dict]:
     """Return provider/model options for client dropdowns."""
     return _MODEL_CATALOG
+
+@router.get("/{model_id}/usage")
+async def get_model_usage(
+    model_id: str,
+    limit: int = 50,
+    user: UserRow = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ModelUsageDetailResponse:
+    """Get detailed usage statistics and query history for a model connection."""
+    from sqlalchemy import func
+    import json
+    from app.models.db_models import QueryRow, ResponseRow
+    
+    # Get the model connection
+    result = await db.execute(
+        select(ModelConnectionRow).where(
+            ModelConnectionRow.id == model_id,
+            ModelConnectionRow.user_id == user.id,
+        )
+    )
+    model_row = result.scalar_one_or_none()
+    if not model_row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Model connection not found")
+    
+    # Get aggregate statistics
+    from sqlalchemy import case as sql_case, or_
+    
+    # Handle both "gpt-4o" and "openai/gpt-4o" formats
+    model_name_short = model_row.model_name.split('/')[-1]  # Extract "gpt-4o" from "openai/gpt-4o"
+    
+    stats_result = await db.execute(
+        select(
+            func.count(QueryRow.id),
+            func.coalesce(func.sum(ResponseRow.input_tokens), 0),
+            func.coalesce(func.sum(ResponseRow.output_tokens), 0),
+            func.coalesce(func.sum(ResponseRow.estimated_cost), 0.0),
+            func.coalesce(func.avg(ResponseRow.latency_ms), 0),
+            func.sum(sql_case((ResponseRow.status_code >= 400, 1), else_=0)),
+        )
+        .select_from(QueryRow)
+        .join(ResponseRow, ResponseRow.query_id == QueryRow.id)
+        .where(
+            or_(
+                QueryRow.model == model_row.model_name,  # Match full name "openai/gpt-4o"
+                QueryRow.model == model_name_short,      # Match short name "gpt-4o"
+            ),
+            QueryRow.user_id == user.id,
+        )
+    )
+    stats_row = stats_result.one()
+    
+    total_requests = stats_row[0] or 0
+    total_input = stats_row[1] or 0
+    total_output = stats_row[2] or 0
+    total_cost = float(stats_row[3] or 0.0)
+    avg_latency = int(stats_row[4] or 0)
+    error_count = stats_row[5] or 0
+    success_rate = ((total_requests - error_count) / total_requests * 100) if total_requests > 0 else 100.0
+    
+    stats = ModelUsageStats(
+        total_requests=total_requests,
+        total_input_tokens=total_input,
+        total_output_tokens=total_output,
+        total_tokens=total_input + total_output,
+        total_cost=total_cost,
+        avg_latency_ms=avg_latency,
+        error_count=error_count,
+        success_rate=round(success_rate, 2),
+    )
+    
+    # Get recent queries with responses
+    queries_result = await db.execute(
+        select(QueryRow)
+        .where(
+            or_(
+                QueryRow.model == model_row.model_name,  # Match full name
+                QueryRow.model == model_name_short,      # Match short name
+            ),
+            QueryRow.user_id == user.id,
+        )
+        .order_by(QueryRow.timestamp.desc())
+        .limit(limit)
+    )
+    queries = queries_result.scalars().all()
+    
+    query_details: list[QueryDetailItem] = []
+    for q in queries:
+        # Get response for this query
+        resp_result = await db.execute(
+            select(ResponseRow).where(ResponseRow.query_id == q.id)
+        )
+        r = resp_result.scalar_one_or_none()
+        
+        # Parse input messages
+        try:
+            prompt = json.loads(q.input_messages) if q.input_messages else []
+        except json.JSONDecodeError:
+            prompt = []
+        
+        # Extract response text
+        response_text = ""
+        if r and r.response:
+            try:
+                response_data = json.loads(r.response)
+                # Try to extract content from different response formats
+                if isinstance(response_data, dict):
+                    if "choices" in response_data and len(response_data["choices"]) > 0:
+                        choice = response_data["choices"][0]
+                        if "message" in choice and "content" in choice["message"]:
+                            response_text = choice["message"]["content"]
+                        elif "text" in choice:
+                            response_text = choice["text"]
+                    elif "content" in response_data:
+                        response_text = response_data["content"]
+            except json.JSONDecodeError:
+                response_text = r.response[:500] if r.response else ""
+        
+        query_details.append(
+            QueryDetailItem(
+                query_id=q.id,
+                timestamp=q.timestamp.isoformat() if q.timestamp else "",
+                agent_id=q.agent_id,
+                prompt=prompt,
+                response_text=response_text,
+                input_tokens=r.input_tokens if r else 0,
+                output_tokens=r.output_tokens if r else 0,
+                latency_ms=r.latency_ms if r else 0,
+                status_code=r.status_code if r else 0,
+                estimated_cost=r.estimated_cost if r else 0.0,
+                error_message=r.error_message if r else None,
+            )
+        )
+    
+    return ModelUsageDetailResponse(
+        model_connection=_row_to_response(model_row),
+        stats=stats,
+        recent_queries=query_details,
+    )
+
 
 @router.delete("/{model_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_model_connection(

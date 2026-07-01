@@ -62,9 +62,11 @@ class AgentResponse(BaseModel):
     agent_id: str
     name: str
     description: str
+    token_name: str | None = None
     tags: list[str]
     status: str
     masked_key: str
+    last_used_at: str | None = None
     created_at: str
     updated_at: str
 
@@ -74,6 +76,14 @@ class AgentCreatedResponse(BaseModel):
     agent: AgentResponse
     api_key: str = Field(
         ..., description="Full API key – shown only once, store securely"
+    )
+
+
+class AgentRotatedResponse(BaseModel):
+    """Returned only on rotation — includes the new raw API key once."""
+    agent: AgentResponse
+    api_key: str = Field(
+        ..., description="New full API key – shown only once, store securely"
     )
 
 
@@ -195,3 +205,40 @@ class DashboardResponse(BaseModel):
     totals: DashboardTotals
     metric_series: list[MetricPoint]
     recent_requests: list[RequestEventResponse]
+
+
+# ── Model Usage Details ─────────────────────────────────────────────────
+
+
+class ModelUsageStats(BaseModel):
+    """Aggregate statistics for a model connection."""
+    total_requests: int
+    total_input_tokens: int
+    total_output_tokens: int
+    total_tokens: int
+    total_cost: float
+    avg_latency_ms: int
+    error_count: int
+    success_rate: float
+
+
+class QueryDetailItem(BaseModel):
+    """Individual query/response pair for a model."""
+    query_id: str
+    timestamp: str
+    agent_id: str
+    prompt: list[dict]  # The input messages (JSON parsed)
+    response_text: str  # Extracted content from response
+    input_tokens: int
+    output_tokens: int
+    latency_ms: int
+    status_code: int
+    estimated_cost: float
+    error_message: str | None = None
+
+
+class ModelUsageDetailResponse(BaseModel):
+    """Detailed usage information for a specific model connection."""
+    model_connection: ModelConnectionResponse
+    stats: ModelUsageStats
+    recent_queries: list[QueryDetailItem]

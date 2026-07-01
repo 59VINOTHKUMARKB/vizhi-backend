@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime as _dt
 import hashlib
 import secrets
 import uuid
@@ -85,6 +86,12 @@ def _extract_bearer_token(authorization: str | None) -> str:
     return raw_key
 
 
+async def _touch_agent_last_used(db: AsyncSession, agent: AgentRow) -> None:
+    """Update last_used_at timestamp. Caller's session handles the final commit."""
+    agent.last_used_at = _dt.datetime.utcnow()
+    await db.flush()
+
+
 async def resolve_agent(
     authorization: str | None = Security(_api_key_header),
     db: AsyncSession = Depends(get_db),
@@ -104,6 +111,7 @@ async def resolve_agent(
 
     for agent in agents:
         if verify_api_key(raw_key, agent.api_key_hash):
+            await _touch_agent_last_used(db, agent)
             return agent
 
     raise HTTPException(
@@ -139,6 +147,7 @@ async def resolve_chat_credential(
     agent_result = await db.execute(select(AgentRow).where(AgentRow.status == "active"))
     for agent in agent_result.scalars().all():
         if verify_api_key(raw_key, agent.api_key_hash):
+            await _touch_agent_last_used(db, agent)
             return ChatCredential(
                 principal_id=agent.agent_id,
                 token_type="agent",
@@ -222,6 +231,7 @@ async def verify_agent_queue_credentials(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid agent credentials",
         )
+    await _touch_agent_last_used(db, agent)
     return AgentQueueCredential(
         agent_id=agent.agent_id,
         agent_name=agent.name,
